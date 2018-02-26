@@ -1,0 +1,385 @@
+<html>
+<head>
+<title>DataXplorer</title>
+<style>
+* {
+  font-family: Calibri;
+  font-size:14;
+}
+.helphints{
+  width:200px;
+  height:50px;
+  color:#ffffff;
+  background-color:None;
+  font-size:18;
+  font-family:comic sans ms;
+  position:absolute;
+  z-index:9;
+}
+.helpmask{
+  position:absolute;width:100%;height:100%;background-color:gray;z-index:8;opacity:0.6;
+}
+.hide{
+  display:None;
+}
+div.charts{
+  width:90%;
+  height:50%;
+  display:block;
+  float:left;
+}
+.dinp{
+  width:60px;
+}
+.header{
+  width:100%;
+  text-align:center; 
+  font-size:24;
+  background-color: #bbbbFF;
+  color:black;
+}
+</style>
+<script src="http://localhost:{{port}}/script/canvasjs.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+<script>
+function hidehints(){
+  var els = document.getElementsByClassName("helphints");
+  var N = els.length;
+  while(els.length>0) {
+    var pel = els[0].parentElement;
+    if(pel==null) pel = els[0].parentNode;
+    pel.removeChild(els[0]);
+  }
+  
+  var els = document.getElementsByClassName("helpmask");
+  var N = els.length;
+  while(els.length>0) {
+    var pel = els[0].parentElement;
+    if(pel==null) pel = els[0].parentNode;
+    pel.removeChild(els[0]);
+  }
+}
+</script>
+<script>
+var tags = [];
+var xoff = 0.0;
+var xscale = 1.0;
+var datafile = "{{datafile}}";
+var charts = {'diff':0};
+var hostip = 'http://localhost:{{port}}';
+var plotQuery = '';
+var columns = [];
+var columnIndex = {};
+var selections = {};
+// Functions for UX
+function clearOptions(el) {
+  while(el.childNodes.length>0) {
+    el.removeChild(el.childNodes[0]);
+  }
+}
+function addOption(el,val,name) {
+  var opt = document.createElement('option');
+  opt.setAttribute("value",val);
+  opt.innerHTML = name;
+  el.appendChild(opt);
+}
+function addOptions(el,vals) {
+  if((el.id=='ref')||(el.id=='xcol')) {
+    addOption(el, "", 'None');
+  }
+  for(var m=0; m<vals.length; m++) {
+    addOption(el, vals[m][1], vals[m][1]);
+  }
+}
+function getConfig() {
+  var txt = {'ref': document.getElementById("ref").value, 'xcol': document.getElementById('xcol').value};
+  if(document.getElementById('ffton').checked) {
+    txt['ffton'] = 1;
+  }
+  return txt;
+}
+function updateColumns(el,val) {
+  for(var m=0; m<el.length; m++) {
+    if(el[m].selected) {
+      columns[ columnIndex[el[m].value] ][0] = val;
+    }
+  }
+}
+function refillColumns(){
+  src = document.getElementById('src');
+  dst = document.getElementById('dest');
+  clearOptions(src);
+  clearOptions(dest);
+  for(var m=0; m<columns.length; m++) {
+    if(columns[m][0]==1) addOption(dest, columns[m][1], columns[m][1]);
+    if(columns[m][0]==0) addOption(src, columns[m][1], columns[m][1]);
+  }
+}
+function filterTags() {
+  var tag = document.getElementById('tags').value;
+  if(tag=="All") {
+    for(var m=0; m<columns.length; m++) {
+      if(columns[m][0]==2) columns[m][0]=0;
+    }
+  }
+  else {
+    for(var m=0; m<columns.length; m++) {
+      if(columns[m][0]==0) columns[m][0]=2;
+    }
+    var m = 0;
+    for(m=0; m<tags.length; m++) {
+      if(tags[m][0]==tag) break;
+    }
+    for(var n=0; n<tags[m][1][1].length;n++) {
+      var indx = tags[m][1][1][n];
+      if(columns[indx][0]==2) columns[indx][0] = 0;
+    }
+  }
+  refillColumns();
+}
+function fileAdd(){
+  updateColumns(document.getElementById('src'), 1);
+  refillColumns();
+  updateChart();
+}
+function fileDel() {
+  updateColumns(document.getElementById('dest'), 0);
+  refillColumns();
+  updateChart();
+}
+function updateChart() {
+  plotQuery = getConfig();
+  var destEl = document.getElementById('dest');
+  plotQuery['data'] = [];
+  for(var i=0; i<destEl.length; i++) {
+    plotQuery['data'].push(destEl[i].value);
+  }
+  //document.getElementById('status').innerHTML = txt;
+  getAndPlotChart();
+}
+
+// Function with server calls
+function getAndPlotChart() {
+  document.getElementById("status").innerHTML = "Ref : "+plotQuery["ref"];
+  $.getJSON(hostip+'/plot/'+JSON.stringify(plotQuery),function(res){
+    createChart('diff',res);
+  });
+}
+function loadOptions(){
+  $.getJSON(hostip+'/options',function(res){
+      if('columns' in res) {
+        columns = res['columns'];
+        selections = res['selections'];
+        columnIndex = res['columnIndex'];
+        tags = res['tags'];
+        el = document.getElementById("sel")
+        clearOptions(el);
+        for(var sel in selections) {
+          var query = {};
+          query['ref'] = selections[sel]['ref'];
+          query['xcol'] = selections[sel]['xcol'];
+          query['data'] = [];
+          for(var m=0; m<selections[sel]['data'].length; m++) {
+            query['data'].push(selections[sel]['data'][m]);
+          }
+          selections[sel] = query;
+          addOption(el, sel, sel);
+        }
+      } else {
+        columns = [];
+        columnIndex = {};
+        for(var m=0;m<res['data'].length;m++) {
+          columnIndex[res['data'][m]] = columns.length;
+          columns.push([0,res['data'][m]]);
+        }
+        tags = res['tags'];
+      }
+      
+      el = document.getElementById('tags')
+      addOption(el, 'All', 'All');
+      for(var m=0; m<tags.length; m++) {
+        addOption(el,tags[m][0], ''+tags[m][0]+' ['+tags[m][1][0]+']');
+      }
+      
+      el = document.getElementById("ref");
+      clearOptions(el);
+      addOptions(el, columns);
+      
+      el = document.getElementById("xcol");
+      clearOptions(el);
+      addOptions(el, columns);
+      
+      refillColumns();
+    });
+}
+function saveSel(){
+  var name = prompt("Enter selection name:","");
+  if(name=="null") return;
+  if(name=="") {
+    name = "sel"+selections.length;
+  }
+  if(name in selections) {
+    selections[name] = plotQuery;
+  } else {
+    selections[name] = plotQuery;
+    addOption(document.getElementById("sel"),name,name);
+  }
+}
+function delSel(){
+  var el = document.getElementById("sel");
+  var tsel = [];
+  for(var m=0;m<el.length;m++) {
+    if(!el[m].selected) tsel.push([el[m].value,selections[el[m].value]]);
+  }
+  selections = {};
+  clearOptions(el);
+  for(var m=0;m<tsel.length;m++) {
+    addOption(el, tsel[m][0], tsel[m][0]);
+    selections[tsel[m][0]] = tsel[m][1];
+  }
+}
+function selChange(){
+  // mark dest entries to src
+  var el = document.getElementById('dest');
+  for(var n=0;n<el.length;n++) columns[columnIndex[el[n].value]][0] = 0;
+  // mark sel entries to dest
+  var nam = document.getElementById("sel").value;
+  var sel = selections[nam];
+  for(var n=0;n<sel['data'].length;n++) columns[columnIndex[ sel['data'][n] ]][0] = 1;
+  refillColumns();
+  plotQuery = sel;
+  getAndPlotChart();
+  document.getElementById("status").innerHTML += ', Selection:'+nam;
+}
+// Functions to update, create charts
+function newChartSeries(res){
+  xoff = parseFloat(document.getElementById("xoff").value);
+  xscale = parseFloat(document.getElementById("xscale").value);
+  var series = [];
+  for(var m=0;m<res.length;m++) {
+    var ser = {
+          type: res[m]['type'],
+          name: res[m]['name'],
+          legendText: res[m]['legendText'],
+          showInLegend: true,
+          lineThickness: res['lineThickness'],
+          toolTipContent: "{name}<br/>{x}, {y}",
+          dataPoints: []};
+    
+    for(var n=0; n<res[m]['dataPoints'].length; n++)
+      ser.dataPoints.push({x:(res[m]['dataPoints'][n]['x']-xoff)*xscale, y:res[m]['dataPoints'][n]['y']});
+
+    series.push(ser);
+  }
+  return series;
+}
+function createChart(name,res){
+  charts[name] = new CanvasJS.Chart(name, {
+    animationEnabled: false,
+    zoomEnabled: true,
+    zoomType: "xy",
+    toolTip: { shared: false},
+    legend: {
+      cursor: "pointer",
+      itemclick: toogleDataSeries
+    },
+    data: newChartSeries(res)
+  });
+  charts[name].render();
+}
+function toogleDataSeries(e){
+	if (typeof(e.dataSeries.visible) === "undefined" || e.dataSeries.visible) {
+		e.dataSeries.visible = false;
+	} else{
+		e.dataSeries.visible = true;
+	}
+	charts['diff'].render();
+}
+function closesession(){
+  $.getJSON(hostip+'/close',function(res){});
+  var el = document.getElementsByTagName('body')
+  el = el[0];
+  while(el.childNodes.length>0) el.removeChild(el.childNodes[0]);
+  var hed = document.createElement('h1')
+  hed.setAttribute("class","header");
+  hed.innerHTML = 'DataFrame Explorer';
+  el.appendChild(hed);
+  hed = document.createElement('br');
+  el.appendChild(hed);
+  hed = document.createElement('h1')
+  hed.innerHTML = 'ALL DONE';
+  hed.setAttribute("class","header");
+  el.appendChild(hed);
+  hed = document.createElement('<div>')
+  hed.innerHTML = 'any queries/bugs/suggestion please email makechaos[at]gmail[dot]com';
+  el.appendChild(hed);
+}
+// Initial load function
+function initPage(){
+  loadOptions();
+  var res = [{'type':'line','name':'init','legendText':'init','lineThickness':1,'dataPoints':function(){var res=[]; for(var m=0;m<100;m++) res.push({'x':m,'y':Math.random()}); return res;}() }];
+  createChart('diff',res);
+  var els = document.getElementsByClassName("helphints");
+  for(var m=0; m<els.length; m++) els[m].setAttribute("onclick","hidehints()");
+}
+
+function savesession() {
+  var name = prompt("Enter session name:","");
+  var session = {};
+  session['name'] = name;
+  session['selections'] = selections;
+  session['columns'] = columns;
+  session['datafile'] = datafile;
+  session['columnIndex'] = columnIndex;
+  session['tags'] = tags;
+  $.getJSON(hostip+'/savesession/'+JSON.stringify(session),function(res){
+    document.getElementById("status").innerHTML = res;
+  });
+}
+</script>
+</head>
+<body onload="initPage()">
+<div class="helpmask" onclick="hidehints()"></div>
+<h1 class="header">DataFrame  Explorer</h1>
+<div  style="float:left;"><div class="helphints"  style="margin-top:10px;">Ref. Col</div>
+Reference : <select id="ref" style="width:100px;"></select></div><div style="float:left;"><div class="helphints"  style="margin-top:10px;">X-axis</div>
+| X-col. : <select id="xcol" style="width:100px;"></select></div><div style="float:left;">
+| X-offset : <input class="dinp" id="xoff" value="50e-9"  onchange="updateChart()"></input></div><div style="float:left;">
+| X-scale : <input id="xscale" class="dinp" value="1.45e8"  onchange="updateChart()"></input></div><div style="float:left;">
+| <input type="checkbox" id="ffton" onchange="updateChart()">FFT</input></div><div style="float:left;">
+<div class="helphints"  style="margin-top:10px;">Manage sessions</div>
+| <button onclick="savesession()">Save Session</button>
+| <button onclick="closesession()">Close</button></div></div>
+</br><hr>
+<table>
+<tr>
+<td>
+Columns: <select id="tags" onchange="filterTags()" style="width:80px;"></select><div class="helphints"  style="margin-top:-10px;margin-left:50px;">Filter by Tags</div>
+<div class="helphints" style="margin-top:50px;margin-left:50px;">Columns available</div>
+<td></td>
+<td>
+Selections: <select id="sel" style="width:80px;" onchange="selChange()"></select>
+<div class="helphints" style="margin-top:-10px;margin-left:100px;">Selection sets</div>
+| <button onclick="selChange()">Go</button>
+| <button onclick="saveSel()">Save</button>
+| <button onclick="delSel()">Del.</button>
+<div class="helphints" style="margin-top:50px;margin-left:50px;">Columns selected for plotting</div>
+</td></tr>
+<tr><td>
+<select id="src" style="float:left;width:300px;" multiple size="10"></select>
+</td><td>
+<div style="display:block;float:left;margin-left:10px;margin-right:10px;">
+<button style="margin:5px;font-weight:bold;" onclick="fileAdd()">>></button></br>
+<button style="margin:5px;font-weight:bold;" onclick="fileDel()"><<</button>
+<div class="helphints" style="width:50px;">Shifting columns</div>
+</td><td>
+<select id="dest" style="float:left;width:300px;" multiple size="10"></select>
+</td>
+</tr>
+</table>
+
+<div id='status' style="float:left;"></div> <br>
+<div>
+<div class="helphints" style="width:50px;border-color:black;margin-left:200px;margin-top:20px;">Plot Area</div><div id="diff" class="charts"></div></div>
+</body>
+</html>
